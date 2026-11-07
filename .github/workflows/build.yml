@@ -1,0 +1,73 @@
+name: Build Mockex APK
+
+# Repo layout this expects (nothing else needed):
+#   mockex.zip                      <- upload the zip as-is, do not unzip it
+#   .github/workflows/build.yml     <- this file
+on:
+  workflow_dispatch:            # Actions tab -> Build Mockex APK -> Run workflow
+  push:
+    paths: ['mockex.zip']       # also builds automatically whenever you replace the zip
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unzip project
+        run: |
+          test -f mockex.zip || { echo "mockex.zip not found in the repo root"; exit 1; }
+          rm -rf _src && mkdir _src && unzip -q mockex.zip -d _src
+          APP_DIR=$(dirname "$(find _src -name package.json -not -path '*/node_modules/*' | head -n1)")
+          echo "APP_DIR=$APP_DIR" >> "$GITHUB_ENV"
+          echo "Project folder: $APP_DIR" && ls "$APP_DIR"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Unit tests (trading engine, indicators, feed reconnects)
+        working-directory: ${{ env.APP_DIR }}
+        run: npm test
+
+      - name: Install dependencies
+        working-directory: ${{ env.APP_DIR }}
+        run: npm install --no-audit --no-fund
+
+      - name: Add Android platform
+        working-directory: ${{ env.APP_DIR }}
+        run: npx cap add android
+
+      - name: Generate Mockex launcher icons and splash
+        working-directory: ${{ env.APP_DIR }}
+        run: npx @capacitor/assets generate --android --iconBackgroundColor '#080812' --iconBackgroundColorDark '#080812' --splashBackgroundColor '#05060f' --splashBackgroundColorDark '#05060f'
+
+      - name: Android permissions (notifications, vibration)
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          f=android/app/src/main/AndroidManifest.xml
+          grep -q POST_NOTIFICATIONS "$f" || sed -i 's#</manifest>#    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.VIBRATE" />\n</manifest>#' "$f"
+          grep -n "uses-permission" "$f"
+
+      - name: Sync web assets into the Android project
+        working-directory: ${{ env.APP_DIR }}
+        run: npx cap sync android
+
+      - name: Build debug APK
+        working-directory: ${{ env.APP_DIR }}/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mockex-debug-apk
+          path: ${{ env.APP_DIR }}/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
