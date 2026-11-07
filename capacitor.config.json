@@ -1,0 +1,8 @@
+{
+  "appId": "com.mockex.paper",
+  "appName": "Mockex",
+  "webDir": "www",
+  "backgroundColor": "#05060f",
+  "android": { "allowMixedContent": false },
+  "plugins": { "LocalNotifications": { "iconColor": "#8B7BFF" } }
+}
