@@ -1,0 +1,61 @@
+name: Build APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with: { distribution: temurin, java-version: 17 }
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: 8.10.2 }
+
+      # Finds the project wherever you uploaded it: a zip (any folder, any
+      # name containing "mimesis") or an already-extracted project folder.
+      - name: Locate project
+        run: |
+          echo "--- repo contents ---"
+          ls -la
+          ZIP=$(find . -maxdepth 3 -iname '*mimesis*.zip' -not -path './.git/*' | head -n 1)
+          if [ -n "$ZIP" ]; then
+            echo "Using zip: $ZIP"
+            mkdir -p _src
+            unzip -q -o "$ZIP" -d _src
+            SEARCH=_src
+          else
+            echo "No zip found - looking for an extracted project instead"
+            SEARCH=.
+          fi
+          SETTINGS=$(find "$SEARCH" -maxdepth 4 \( -name settings.gradle.kts -o -name settings.gradle \) -not -path './.git/*' | head -n 1)
+          if [ -z "$SETTINGS" ]; then
+            echo "::error::No Android project (settings.gradle.kts) found. Upload mimesis-phase7.zip (or the project folder) to the repo root."
+            exit 1
+          fi
+          PROJECT_DIR=$(dirname "$SETTINGS")
+          echo "Project dir: $PROJECT_DIR"
+          echo "PROJECT_DIR=$GITHUB_WORKSPACE/${PROJECT_DIR#./}" >> "$GITHUB_ENV"
+
+      - name: Build debug APK
+        run: |
+          set -o pipefail
+          cd "$PROJECT_DIR"
+          gradle assembleDebug --stacktrace --no-daemon 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
+
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: ignore
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: Mimesis-debug-apk
+          path: "**/build/outputs/apk/debug/*.apk"
